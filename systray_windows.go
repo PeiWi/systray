@@ -370,15 +370,14 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 					t.onRClick(t)
 				}()
 			} else {
-				// Use goroutine to handle menu display
-				go func() {
-					defer func() {
-						if r := recover(); r != nil {
-							log.Printf("systray error: recovered from panic in menu show: %v\n", r)
-						}
-					}()
-					t.ShowMenu()
-				}()
+				// Show menu directly in the main thread with error handling
+				if err := t.ShowMenu(); err != nil {
+					log.Printf("systray error: failed to show menu: %v\n", err)
+					// Try to recover by recreating the menu
+					if err := t.createMenu(); err != nil {
+						log.Printf("systray error: failed to recreate menu: %v\n", err)
+					}
+				}
 			}
 		case WM_LBUTTONUP:
 			if t.onClick != nil {
@@ -779,23 +778,42 @@ func (t *winTray) ShowMenu() error {
 	const (
 		TPM_BOTTOMALIGN = 0x0020
 		TPM_LEFTALIGN   = 0x0000
+		TPM_RIGHTBUTTON = 0x0002
+		TPM_RETURNCMD   = 0x0100
+		TPM_NONOTIFY    = 0x0080
 	)
+
+	// Get cursor position
 	p := point{}
 	res, _, err := pGetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
 	if res == 0 {
 		return err
 	}
-	pSetForegroundWindow.Call(uintptr(t.window))
 
+	// Lock menu access
+	t.muMenus.RLock()
+	menu := t.menus[0]
+	t.muMenus.RUnlock()
+
+	if menu == 0 {
+		return errors.New("menu not initialized")
+	}
+
+	// Ensure window is in foreground
+	pSetForegroundWindow.Call(uintptr(t.window))
+	pUpdateWindow.Call(uintptr(t.window))
+
+	// Show menu with return command flag and nonotify flag
 	res, _, err = pTrackPopupMenu.Call(
-		uintptr(t.menus[0]),
-		TPM_BOTTOMALIGN|TPM_LEFTALIGN,
+		uintptr(menu),
+		TPM_BOTTOMALIGN|TPM_LEFTALIGN|TPM_RIGHTBUTTON|TPM_RETURNCMD|TPM_NONOTIFY,
 		uintptr(p.X),
 		uintptr(p.Y),
 		0,
 		uintptr(t.window),
 		0,
 	)
+
 	if res == 0 {
 		return err
 	}

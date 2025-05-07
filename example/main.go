@@ -2,14 +2,15 @@ package main
 
 import (
 	"fmt"
-	"github.com/energye/systray"
-	"github.com/energye/systray/icon"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/PeiWi/systray"
+	"github.com/PeiWi/systray/icon"
 )
 
 func main() {
