@@ -320,18 +320,33 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		WM_CLOSE         = 0x0010
 		WM_DESTROY       = 0x0002
 	)
+
+	// Add error handling and protection mechanism
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("systray error: recovered from panic in wndProc: %v\n", r)
+			lResult = 0
+		}
+	}()
+
 	switch message {
 	case WM_COMMAND:
 		menuItemId := int32(wParam)
-		// https://docs.microsoft.com/en-us/windows/win32/menurc/wm-command#menus
 		if menuItemId != -1 {
-			systrayMenuItemSelected(uint32(wParam))
+			// Use goroutine to handle menu events to avoid blocking the main thread
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("systray error: recovered from panic in menu item handler: %v\n", r)
+					}
+				}()
+				systrayMenuItemSelected(uint32(wParam))
+			}()
 		}
 	case WM_CLOSE:
 		pDestroyWindow.Call(uintptr(t.window))
 		t.wcex.unregister()
 	case WM_DESTROY:
-		// same as WM_ENDSESSION, but throws 0 exit code after all
 		defer pPostQuitMessage.Call(uintptr(int32(0)))
 		fallthrough
 	case WM_ENDSESSION:
@@ -345,26 +360,56 @@ func (t *winTray) wndProc(hWnd windows.Handle, message uint32, wParam, lParam ui
 		switch lParam {
 		case WM_RBUTTONUP:
 			if t.onRClick != nil {
-				t.onRClick(t)
+				// Use goroutine to handle right click events
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("systray error: recovered from panic in right click handler: %v\n", r)
+						}
+					}()
+					t.onRClick(t)
+				}()
 			} else {
-				t.ShowMenu()
+				// Use goroutine to handle menu display
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("systray error: recovered from panic in menu show: %v\n", r)
+						}
+					}()
+					t.ShowMenu()
+				}()
 			}
 		case WM_LBUTTONUP:
 			if t.onClick != nil {
-				t.onClick(t)
+				// Use goroutine to handle left click events
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("systray error: recovered from panic in left click handler: %v\n", r)
+						}
+					}()
+					t.onClick(t)
+				}()
 			}
 		case WM_LBUTTONDBLCLK:
 			if t.onDClick != nil {
-				t.onDClick(t)
+				// Use goroutine to handle double click events
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("systray error: recovered from panic in double click handler: %v\n", r)
+						}
+					}()
+					t.onDClick(t)
+				}()
 			}
 		}
-	case t.wmTaskbarCreated: // on explorer.exe restarts
+	case t.wmTaskbarCreated:
 		t.muNID.Lock()
 		t.nid.add()
 		t.muNID.Unlock()
 	default:
-		// Calls the default window procedure to provide default processing for any window messages that an application does not process.
-		// https://msdn.microsoft.com/en-us/library/windows/desktop/ms633572(v=vs.85).aspx
 		lResult, _, _ = pDefWindowProc.Call(
 			uintptr(hWnd),
 			uintptr(message),
